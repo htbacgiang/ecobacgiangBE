@@ -3,8 +3,12 @@ const router = express.Router();
 const db = require('../config/database');
 const SepayPayment = require('../models/SepayPayment');
 const MomoPayment = require('../models/MomoPayment');
+const Order = require('../models/Order');
+const Cart = require('../models/Cart');
+const User = require('../models/User');
 const crypto = require('crypto');
 const { withAuth } = require('../middleware/auth');
+const { syncOrderToAccounting } = require('../services/accountingService');
 
 // Thông tin tài khoản nhận tiền (CẬP NHẬT THEO THÔNG TIN THẬT CỦA BẠN)
 const BANK_INFO = {
@@ -395,22 +399,62 @@ router.post('/sepay/confirm', withAuth, async (req, res) => {
       });
     }
 
+    // QUAN TRỌNG: Chỉ cho phép xác nhận thủ công khi đã có webhook từ Sepay
+    // Kiểm tra xem đã có dữ liệu webhook từ Sepay chưa (bằng chứng đã chuyển khoản)
+    const callbackData = payment.sepayData?.callbackData;
+    const hasWebhookData = callbackData && (
+      callbackData.source === 'webhook' || 
+      callbackData.source === 'webhook-real' ||
+      callbackData.transactionId ||
+      callbackData.referenceCode ||
+      callbackData.id ||
+      callbackData.gateway ||
+      callbackData.transferAmount ||
+      callbackData.amount
+    );
+
+    console.log("🔍 Checking webhook data:", {
+      hasCallbackData: !!callbackData,
+      callbackData: callbackData,
+      paymentStatus: payment.status,
+      paymentCode: paymentCode
+    });
+
+    if (!hasWebhookData) {
+      console.warn(`⚠️ Manual confirmation attempted without webhook data for payment: ${paymentCode}`);
+      console.warn(`⚠️ Payment sepayData:`, JSON.stringify(payment.sepayData, null, 2));
+      return res.status(400).json({
+        error: "Không thể xác nhận thanh toán. Hệ thống chưa nhận được xác nhận từ ngân hàng.",
+        message: "Vui lòng đợi vài phút để hệ thống tự động xác nhận sau khi chuyển khoản. Nếu đã chuyển khoản nhưng vẫn chưa được xác nhận, vui lòng liên hệ hỗ trợ.",
+        paymentCode,
+        suggestion: "Hệ thống sẽ tự động xác nhận khi nhận được thông báo từ ngân hàng. Vui lòng đợi trong vài phút.",
+        debug: {
+          hasCallbackData: !!callbackData,
+          callbackDataKeys: callbackData ? Object.keys(callbackData) : []
+        }
+      });
+    }
+
     // Nếu có amount, kiểm tra khớp
     if (amount && Math.abs(payment.amount - amount) > 1000) {
       console.warn(`⚠️ Amount mismatch: expected ${payment.amount}, got ${amount}`);
-      // Vẫn cho phép confirm nhưng log warning
+      // Vẫn cho phép confirm nhưng log warning vì đã có webhook data
     }
 
-    // Cập nhật payment status
+    // Cập nhật payment status (chỉ khi đã có webhook data)
     const updatedPayment = await SepayPayment.findOneAndUpdate(
       { paymentCode },
       {
         status: "paid",
-        paidAt: new Date(),
-        transactionId: `manual_${Date.now()}`,
+        paidAt: payment.sepayData?.callbackData?.transactionDate ? 
+               new Date(payment.sepayData.callbackData.transactionDate) : 
+               new Date(),
+        transactionId: payment.sepayData?.callbackData?.transactionId || 
+                      payment.sepayData?.callbackData?.id?.toString() || 
+                      `manual_${Date.now()}`,
         'sepayData.confirmedBy': userId,
         'sepayData.confirmedAt': new Date().toISOString(),
-        'sepayData.confirmationSource': 'manual'
+        'sepayData.confirmationSource': 'manual-with-webhook'
       },
       { new: true }
     );
@@ -568,24 +612,128 @@ router.post('/sepay/webhook', async (req, res) => {
       });
     }
 
-    // Cập nhật payment status
+    // Cập nhật payment status - Đảm bảo callbackData được lưu đúng structure
+    const callbackDataToSave = {
+      receivedAt: new Date().toISOString(),
+      source: "webhook",
+      gateway: gateway,
+      transactionDate: transactionDate,
+      accountNumber: accountNumber,
+      transferType: transferType,
+      transferAmount: transferAmount,
+      amount: amount,
+      referenceCode: referenceCode,
+      description: description,
+      transactionId: transactionId,
+      id: webhookData.id,
+      ...webhookData // Include all other fields
+    };
+
     const updatedPayment = await SepayPayment.findOneAndUpdate(
       { paymentCode: payment.paymentCode },
       {
         status: "paid",
-        paidAt: new Date(),
-        transactionId: transactionId || `sepay_${Date.now()}`,
-        'sepayData.callbackData': {
-          receivedAt: new Date().toISOString(),
-          source: "webhook",
-          ...webhookData
-        }
+        paidAt: transactionDate ? new Date(transactionDate) : new Date(),
+        transactionId: transactionId || webhookData.id?.toString() || `sepay_${Date.now()}`,
+        'sepayData.callbackData': callbackDataToSave
       },
       { new: true }
     );
 
     console.log("✅ Payment updated via webhook:", updatedPayment.paymentCode);
-    console.log(`💰 Amount: ${updatedPayment.amount}, Status: ${updatedPayment.status}`);
+    console.log("✅ Callback data saved:", JSON.stringify(updatedPayment.sepayData?.callbackData, null, 2));
+
+    // Tự động tạo đơn hàng khi thanh toán thành công
+    try {
+      console.log("🛒 Starting auto order creation...");
+      
+      // Tìm order pending có cùng userId và amount
+      let existingOrder = await Order.findOne({
+        user: updatedPayment.userId,
+        paymentMethod: 'Sepay',
+        status: 'pending',
+        finalTotal: updatedPayment.amount
+      }).sort({ createdAt: -1 });
+
+      if (existingOrder) {
+        // Cập nhật order status thành "paid"
+        existingOrder.status = 'paid';
+        await existingOrder.save();
+        console.log(`✅ Updated existing order ${existingOrder._id} to paid status`);
+        
+        // Đồng bộ đơn hàng vào kế toán
+        syncOrderToAccounting(existingOrder, 'pending', updatedPayment.userId).catch(err => {
+          console.error('Lỗi khi đồng bộ đơn hàng vào kế toán:', err);
+        });
+      } else {
+        // Tìm trong Cart để tạo order mới
+        const cart = await Cart.findOne({ user: updatedPayment.userId });
+        const user = await User.findById(updatedPayment.userId);
+        
+        if (cart && cart.products && cart.products.length > 0) {
+          // Tính toán lại totals từ cart
+          const totalPrice = cart.products.reduce((sum, item) => sum + (item.price * (item.quantity || 0)), 0);
+          const totalAfterDiscount = cart.totalAfterDiscount || totalPrice;
+          const shippingFee = 30000;
+          const finalTotal = totalAfterDiscount + shippingFee;
+          
+          // Kiểm tra xem finalTotal có khớp với payment amount không (cho phép sai số 1000 VND)
+          if (Math.abs(finalTotal - updatedPayment.amount) <= 1000) {
+            // Tạo order từ cart
+            const orderItems = cart.products.map(item => ({
+              product: item.product,
+              title: item.title || 'Sản phẩm',
+              quantity: item.quantity || 1,
+              price: item.price || 0,
+              image: item.image || '',
+              unit: item.unit || ''
+            }));
+
+            const newOrder = new Order({
+              user: updatedPayment.userId,
+              orderItems,
+              shippingAddress: {
+                address: user?.address || 'Chưa có địa chỉ'
+              },
+              phone: user?.phone || '',
+              name: user?.name || 'Khách hàng',
+              note: `Thanh toán qua Sepay - Payment Code: ${updatedPayment.paymentCode}`,
+              coupon: cart.coupon || '',
+              discount: cart.discount || 0,
+              totalPrice,
+              totalAfterDiscount,
+              shippingFee,
+              finalTotal,
+              paymentMethod: 'Sepay',
+              status: 'paid', // Tự động đánh dấu là đã thanh toán
+            });
+
+            await newOrder.save();
+            console.log(`✅ Created new order ${newOrder._id} from cart`);
+
+            // Xóa cart sau khi tạo order
+            await Cart.findOneAndUpdate(
+              { user: updatedPayment.userId },
+              { products: [], cartTotal: 0, totalAfterDiscount: 0, coupon: '', discount: 0 }
+            );
+            console.log(`✅ Cleared cart for user ${updatedPayment.userId}`);
+
+            // Đồng bộ đơn hàng vào kế toán
+            syncOrderToAccounting(newOrder, null, updatedPayment.userId).catch(err => {
+              console.error('Lỗi khi đồng bộ đơn hàng vào kế toán:', err);
+            });
+          } else {
+            console.warn(`⚠️ Cart total (${finalTotal}) doesn't match payment amount (${updatedPayment.amount}), skipping auto order creation`);
+          }
+        } else {
+          console.log(`ℹ️ No cart found for user ${updatedPayment.userId}, skipping auto order creation`);
+        }
+      }
+    } catch (orderError) {
+      // Log lỗi nhưng không fail webhook
+      console.error("❌ Error creating order automatically:", orderError);
+      console.error("Order creation error stack:", orderError.stack);
+    }
 
     // Emit socket event để notify frontend
     if (global.io) {

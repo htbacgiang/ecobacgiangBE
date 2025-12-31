@@ -31,6 +31,7 @@ const imageRoutes = require('./routes/image');
 const accountingRoutes = require('./routes/accounting');
 const contactRoutes = require('./routes/contact');
 const promoBannerRoutes = require('./routes/promo-banner');
+const sepayWebhookRealRoutes = require('./routes/sepay-webhook-real');
 
 const app = express();
 const httpServer = createServer(app);
@@ -198,6 +199,7 @@ app.use('/api/image', imageRoutes);
 app.use('/api/accounting', accountingRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/promo-banner', promoBannerRoutes);
+app.use('/api/sepay-webhook-real', sepayWebhookRealRoutes);
 
 // 404 handler
 app.use((req, res) => {
