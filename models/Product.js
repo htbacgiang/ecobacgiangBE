@@ -94,7 +94,7 @@ const productSchema = new mongoose.Schema(
     },
     unit: {
       type: String,
-      enum: ['Kg', 'gam', 'túi', 'chai'],
+      enum: ['Kg', 'gam', 'túi','hộp', 'chai'],
       default: 'Kg',
       required: [true, 'Đơn vị là bắt buộc'],
       trim: true,
