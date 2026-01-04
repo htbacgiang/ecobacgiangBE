@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const Cart = require('../models/Cart');
+const Product = require('../models/Product');
 const { withAuth, optionalAuth } = require('../middleware/auth');
 
 // GET /api/cart - Get user's cart
@@ -20,6 +21,26 @@ router.get('/', optionalAuth, async (req, res) => {
     const cart = await Cart.findOne({ user: targetUserId });
     if (!cart) {
       return res.status(200).json({ products: [], cartTotal: 0 });
+    }
+
+    // Backfill unit for existing carts (so frontend can detect "kg" and allow 0.5)
+    const missingUnitItems = (cart.products || []).filter((p) => !p.unit);
+    if (missingUnitItems.length > 0) {
+      const productIds = missingUnitItems.map((p) => p.product);
+      const products = await Product.find({ _id: { $in: productIds } })
+        .select('_id unit')
+        .lean();
+      const unitMap = new Map(products.map((p) => [p._id.toString(), p.unit]));
+
+      cart.products.forEach((item) => {
+        if (!item.unit) {
+          const u = unitMap.get(item.product.toString());
+          if (u) item.unit = u;
+        }
+      });
+
+      // Save so next time it's already present
+      await cart.save();
     }
     
     // Ensure cartTotal is calculated correctly before returning
@@ -49,7 +70,7 @@ router.get('/', optionalAuth, async (req, res) => {
 router.post('/', optionalAuth, async (req, res) => {
   try {
     await db.connectDb();
-    const { user, product, quantity, price, title, image } = req.body;
+    const { user, product, quantity, price, title, image, unit } = req.body;
 
     // Use user from body or from auth token
     const targetUser = user || req.userId;
@@ -66,7 +87,12 @@ router.post('/', optionalAuth, async (req, res) => {
     if (index >= 0) {
       cart.products[index].quantity += quantity || 1;
     } else {
-      cart.products.push({ product, title, image, quantity: quantity || 1, price });
+      let resolvedUnit = unit;
+      if (!resolvedUnit) {
+        const prod = await Product.findById(product).select('unit').lean();
+        resolvedUnit = prod?.unit;
+      }
+      cart.products.push({ product, title, image, unit: resolvedUnit, quantity: quantity || 1, price });
     }
     // cartTotal and totalAfterDiscount will be calculated automatically by pre-save hook
     await cart.save();
