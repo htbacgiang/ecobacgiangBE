@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../config/database');
 const SepayPayment = require('../models/SepayPayment');
 const Order = require('../models/Order');
+const { normalizeUnit } = require('../utils/normalizeUnit');
 const Cart = require('../models/Cart');
 const User = require('../models/User');
 const { syncOrderToAccounting } = require('../services/accountingService');
@@ -199,7 +200,7 @@ router.post('/', async (req, res) => {
               quantity: item.quantity || 1,
               price: item.price || 0,
               image: item.image || '',
-              unit: item.unit || ''
+              unit: normalizeUnit(item.unit) || ''
             }));
 
             const newOrder = new Order({

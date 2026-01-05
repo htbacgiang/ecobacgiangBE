@@ -2,6 +2,9 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const Product = require('../models/Product');
+const { normalizeUnit } = require('../utils/normalizeUnit');
+
+const VALID_UNITS = ['Kg', '100g', 'túi', 'hộp', 'chai'];
 
 // GET /api/products - Get all products or by category
 router.get('/', async (req, res) => {
@@ -11,10 +14,11 @@ router.get('/', async (req, res) => {
 
     if (_id) {
       // Get product by ID
-      const product = await Product.findById(_id);
+      const product = await Product.findById(_id).lean();
       if (!product) {
         return res.status(404).json({ status: 'error', err: 'Product not found' });
       }
+      product.unit = normalizeUnit(product.unit);
       return res.json({
         status: 'success',
         product,
@@ -23,11 +27,12 @@ router.get('/', async (req, res) => {
 
     // Get products with optional category filter
     const filter = category ? { category, isDeleted: { $ne: true } } : { isDeleted: { $ne: true } };
-    const products = await Product.find(filter);
+    const products = await Product.find(filter).lean();
+    const productsNormalized = products.map((p) => ({ ...p, unit: normalizeUnit(p.unit) }));
     res.json({
       status: 'success',
-      result: products.length,
-      products,
+      result: productsNormalized.length,
+      products: productsNormalized,
     });
   } catch (err) {
     console.error('Error fetching products:', err);
@@ -40,11 +45,13 @@ router.get('/:slug', async (req, res) => {
   try {
     await db.connectDb();
     const { slug } = req.params;
-    const product = await Product.findOne({ slug });
+    const product = await Product.findOne({ slug }).lean();
 
     if (!product) {
       return res.status(404).json({ err: 'Product not found' });
     }
+
+    product.unit = normalizeUnit(product.unit);
 
     res.json({
       status: 'success',
@@ -69,9 +76,12 @@ router.post('/', async (req, res) => {
     }
 
     // Validate unit
-    if (req.body.unit && !['Kg', 'gam', 'túi', 'chai'].includes(req.body.unit)) {
+    if (req.body.unit !== undefined) {
+      req.body.unit = normalizeUnit(req.body.unit);
+    }
+    if (req.body.unit && !VALID_UNITS.includes(req.body.unit)) {
       await session.abortTransaction();
-      return res.status(400).json({ status: 'error', err: 'Đơn vị phải là Kg, gam, túi hoặc chai' });
+      return res.status(400).json({ status: 'error', err: 'Đơn vị phải là Kg, 100g, túi, hộp hoặc chai' });
     }
 
     // Check if maSanPham already exists
@@ -88,7 +98,7 @@ router.post('/', async (req, res) => {
     await session.commitTransaction();
     res.json({
       status: 'success',
-      product,
+      product: { ...product.toObject(), unit: normalizeUnit(product.unit) },
     });
   } catch (err) {
     await session.abortTransaction();
@@ -141,8 +151,11 @@ router.put('/:id', async (req, res) => {
     }
 
     // Validate unit
-    if (req.body.unit && !['Kg', 'gam', 'túi', 'chai'].includes(req.body.unit)) {
-      return res.status(400).json({ status: 'error', err: 'Đơn vị phải là Kg, gam, túi hoặc chai' });
+    if (req.body.unit !== undefined) {
+      req.body.unit = normalizeUnit(req.body.unit);
+    }
+    if (req.body.unit && !VALID_UNITS.includes(req.body.unit)) {
+      return res.status(400).json({ status: 'error', err: 'Đơn vị phải là Kg, 100g, túi, hộp hoặc chai' });
     }
 
     const { maSanPham } = req.body;
@@ -168,7 +181,7 @@ router.put('/:id', async (req, res) => {
     }
     res.json({
       status: 'success',
-      product,
+      product: { ...product.toObject(), unit: normalizeUnit(product.unit) },
     });
   } catch (err) {
     console.error('Error updating product:', err);

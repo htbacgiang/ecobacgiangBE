@@ -6,6 +6,7 @@ const MomoPayment = require('../models/MomoPayment');
 const Order = require('../models/Order');
 const Cart = require('../models/Cart');
 const User = require('../models/User');
+const { normalizeUnit } = require('../utils/normalizeUnit');
 const crypto = require('crypto');
 const { withAuth } = require('../middleware/auth');
 const { syncOrderToAccounting } = require('../services/accountingService');
@@ -686,7 +687,7 @@ router.post('/sepay/webhook', async (req, res) => {
               quantity: item.quantity || 1,
               price: item.price || 0,
               image: item.image || '',
-              unit: item.unit || ''
+            unit: normalizeUnit(item.unit) || ''
             }));
 
             const newOrder = new Order({

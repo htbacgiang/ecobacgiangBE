@@ -8,6 +8,7 @@ const JournalEntry = require('../models/JournalEntry');
 const Account = require('../models/Account');
 const { withAuth, optionalAuth } = require('../middleware/auth');
 const { syncOrderToAccounting } = require('../services/accountingService');
+const { normalizeUnit } = require('../utils/normalizeUnit');
 
 // GET /api/orders - Get user's orders (or all orders if admin)
 router.get('/', optionalAuth, async (req, res) => {
@@ -108,7 +109,7 @@ router.get('/bestsellers', async (req, res) => {
         promotionalPrice: product.promotionalPrice || 0,
         stockStatus: product.stockStatus || 'Còn hàng',
         slug: product.slug,
-        unit: product.unit || 'unit',
+        unit: normalizeUnit(product.unit) || 'unit',
         description: product.description || '',
         category: product.category || '',
         quantity: productQuantities[product.name] || 0

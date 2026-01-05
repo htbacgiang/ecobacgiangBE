@@ -94,7 +94,8 @@ const productSchema = new mongoose.Schema(
     },
     unit: {
       type: String,
-      enum: ['Kg', 'gam', 'túi','hộp', 'chai'],
+      // Keep legacy values, but normalize to "100g" going forward.
+      enum: ['Kg', 'gam', '100gam', '100g', 'túi', 'hộp', 'chai'],
       default: 'Kg',
       required: [true, 'Đơn vị là bắt buộc'],
       trim: true,

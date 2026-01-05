@@ -4,6 +4,7 @@ const db = require('../config/database');
 const Cart = require('../models/Cart');
 const Product = require('../models/Product');
 const { withAuth, optionalAuth } = require('../middleware/auth');
+const { normalizeUnit } = require('../utils/normalizeUnit');
 
 // GET /api/cart - Get user's cart
 router.get('/', optionalAuth, async (req, res) => {
@@ -35,7 +36,7 @@ router.get('/', optionalAuth, async (req, res) => {
       cart.products.forEach((item) => {
         if (!item.unit) {
           const u = unitMap.get(item.product.toString());
-          if (u) item.unit = u;
+          if (u) item.unit = normalizeUnit(u);
         }
       });
 
@@ -92,6 +93,7 @@ router.post('/', optionalAuth, async (req, res) => {
         const prod = await Product.findById(product).select('unit').lean();
         resolvedUnit = prod?.unit;
       }
+      resolvedUnit = normalizeUnit(resolvedUnit);
       cart.products.push({ product, title, image, unit: resolvedUnit, quantity: quantity || 1, price });
     }
     // cartTotal and totalAfterDiscount will be calculated automatically by pre-save hook
