@@ -7,6 +7,7 @@ const { normalizeUnit } = require('../utils/normalizeUnit');
 const Cart = require('../models/Cart');
 const User = require('../models/User');
 const { syncOrderToAccounting } = require('../services/accountingService');
+const { commitForPaidOrder, normalizeCode } = require('../services/couponUsageService');
 
 // POST /api/sepay-webhook-real - Sepay webhook callback (real production webhook)
 // Route này được Sepay gọi trực tiếp với URL: https://ecobacgiang.vn/api/sepay-webhook-real
@@ -161,22 +162,51 @@ router.post('/', async (req, res) => {
     try {
       console.log("🛒 Starting auto order creation...");
       
-      // Tìm order pending có cùng userId và amount
+      // Tìm order pending ưu tiên theo paymentCode (giảm rủi ro match nhầm theo amount)
       let existingOrder = await Order.findOne({
         user: updatedPayment.userId,
         paymentMethod: 'Sepay',
         status: 'pending',
-        finalTotal: updatedPayment.amount
+        paymentCode: updatedPayment.paymentCode
       }).sort({ createdAt: -1 });
+
+      // Fallback: match theo amount (logic cũ)
+      if (!existingOrder) {
+        existingOrder = await Order.findOne({
+          user: updatedPayment.userId,
+          paymentMethod: 'Sepay',
+          status: 'pending',
+          finalTotal: updatedPayment.amount
+        }).sort({ createdAt: -1 });
+      }
 
       if (existingOrder) {
         // Cập nhật order status thành "paid"
+        const previousStatus = existingOrder.status;
         existingOrder.status = 'paid';
         await existingOrder.save();
         console.log(`✅ Updated existing order ${existingOrder._id} to paid status`);
+
+        // Commit coupon usage if needed (idempotent via flags)
+        try {
+          const code = normalizeCode(existingOrder.coupon);
+          if (code && existingOrder.user && !existingOrder.couponCommitted) {
+            await commitForPaidOrder({
+              code,
+              userId: existingOrder.user,
+              session: null,
+              hasReservation: !!existingOrder.couponReserved,
+            });
+            existingOrder.couponCommitted = true;
+            existingOrder.couponReserved = false;
+            await existingOrder.save();
+          }
+        } catch (couponErr) {
+          console.error('Coupon commit error (webhook-real):', couponErr);
+        }
         
         // Đồng bộ đơn hàng vào kế toán
-        syncOrderToAccounting(existingOrder, 'pending', updatedPayment.userId).catch(err => {
+        syncOrderToAccounting(existingOrder, previousStatus, updatedPayment.userId).catch(err => {
           console.error('Lỗi khi đồng bộ đơn hàng vào kế toán:', err);
         });
       } else {
@@ -220,10 +250,30 @@ router.post('/', async (req, res) => {
               finalTotal,
               paymentMethod: 'Sepay',
               status: 'paid', // Tự động đánh dấu là đã thanh toán
+              paymentCode: updatedPayment.paymentCode,
+              couponReserved: false,
+              couponCommitted: false,
             });
 
             await newOrder.save();
             console.log(`✅ Created new order ${newOrder._id} from cart`);
+
+            // Commit coupon usage if present (best-effort)
+            try {
+              const code = normalizeCode(newOrder.coupon);
+              if (code && newOrder.user && !newOrder.couponCommitted) {
+                await commitForPaidOrder({
+                  code,
+                  userId: newOrder.user,
+                  session: null,
+                  hasReservation: false,
+                });
+                newOrder.couponCommitted = true;
+                await newOrder.save();
+              }
+            } catch (couponErr) {
+              console.error('Coupon commit error (auto order creation):', couponErr);
+            }
 
             // Xóa cart sau khi tạo order
             await Cart.findOneAndUpdate(

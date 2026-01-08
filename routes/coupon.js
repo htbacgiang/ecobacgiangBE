@@ -34,7 +34,7 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     await db.connectDb();
-    const { coupon, startDate, endDate, discount } = req.body;
+    const { coupon, startDate, endDate, discount, globalUsageLimit, perUserUsageLimit } = req.body;
 
     if (!coupon || !startDate || !endDate || discount == null) {
       return res.status(400).json({ 
@@ -63,7 +63,16 @@ router.post('/', async (req, res) => {
       startDate,
       endDate,
       discount,
+      globalUsageLimit: globalUsageLimit === '' ? null : (globalUsageLimit == null ? null : Number(globalUsageLimit)),
+      perUserUsageLimit: perUserUsageLimit === '' ? null : (perUserUsageLimit == null ? null : Number(perUserUsageLimit)),
     });
+
+    if (newCoupon.globalUsageLimit != null && newCoupon.globalUsageLimit < 0) {
+      return res.status(400).json({ message: 'Số lượng mã (global) phải >= 0' });
+    }
+    if (newCoupon.perUserUsageLimit != null && newCoupon.perUserUsageLimit < 0) {
+      return res.status(400).json({ message: 'Số lượt / user phải >= 0' });
+    }
 
     await newCoupon.save();
     return res.status(201).json(newCoupon);
@@ -78,7 +87,7 @@ router.put('/:couponId', async (req, res) => {
   try {
     await db.connectDb();
     const { couponId } = req.params;
-    const { coupon, startDate, endDate, discount } = req.body;
+    const { coupon, startDate, endDate, discount, globalUsageLimit, perUserUsageLimit } = req.body;
 
     const updateData = {};
     if (coupon) updateData.coupon = coupon.toUpperCase();
@@ -91,6 +100,17 @@ router.put('/:couponId', async (req, res) => {
         });
       }
       updateData.discount = discount;
+    }
+
+    if (globalUsageLimit !== undefined) {
+      const v = globalUsageLimit === '' || globalUsageLimit == null ? null : Number(globalUsageLimit);
+      if (v != null && v < 0) return res.status(400).json({ message: 'Số lượng mã (global) phải >= 0' });
+      updateData.globalUsageLimit = v;
+    }
+    if (perUserUsageLimit !== undefined) {
+      const v = perUserUsageLimit === '' || perUserUsageLimit == null ? null : Number(perUserUsageLimit);
+      if (v != null && v < 0) return res.status(400).json({ message: 'Số lượt / user phải >= 0' });
+      updateData.perUserUsageLimit = v;
     }
 
     const updatedCoupon = await Coupon.findByIdAndUpdate(

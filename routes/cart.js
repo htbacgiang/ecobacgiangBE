@@ -5,6 +5,7 @@ const Cart = require('../models/Cart');
 const Product = require('../models/Product');
 const { withAuth, optionalAuth } = require('../middleware/auth');
 const { normalizeUnit } = require('../utils/normalizeUnit');
+const { validateForCart, normalizeCode } = require('../services/couponUsageService');
 
 // GET /api/cart - Get user's cart
 router.get('/', optionalAuth, async (req, res) => {
@@ -123,7 +124,8 @@ router.delete('/:userId/:productId', async (req, res) => {
 });
 
 // PUT /api/cart/:userId/:productId - Update product quantity in cart
-router.put('/:userId/:productId', async (req, res) => {
+// IMPORTANT: Restrict :productId to Mongo ObjectId format so it doesn't match "/apply-coupon"
+router.put('/:userId/:productId([0-9a-fA-F]{24})', async (req, res) => {
   try {
     await db.connectDb();
     const { userId, productId } = req.params;
@@ -149,21 +151,41 @@ router.put('/:userId/apply-coupon', async (req, res) => {
   try {
     await db.connectDb();
     const { userId } = req.params;
-    const { coupon, discount, totalAfterDiscount } = req.body;
+    // Support multiple client payload shapes
+    // - { coupon: "ECO10" } (preferred)
+    // - { code: "ECO10" }
+    // - query ?coupon=ECO10
+    const rawCoupon = req.body?.coupon ?? req.body?.code ?? req.query?.coupon ?? req.query?.code;
+
+    // If client didn't send anything, don't silently clear existing coupon
+    if (rawCoupon === undefined) {
+      return res.status(400).json({ message: 'Thiếu mã giảm giá (coupon).' });
+    }
 
     const cart = await Cart.findOne({ user: userId });
     if (!cart) {
       return res.status(404).json({ message: 'Cart not found' });
     }
 
-    // Update coupon info
-    cart.coupon = coupon || '';
-    cart.discount = discount || 0;
-    // cartTotal and totalAfterDiscount will be calculated automatically by pre-save hook
-    // If totalAfterDiscount is provided, use it; otherwise it will be calculated
-    if (totalAfterDiscount !== undefined && totalAfterDiscount !== null) {
-      cart.totalAfterDiscount = totalAfterDiscount;
+    const code = normalizeCode(rawCoupon);
+
+    // Clear coupon
+    if (!code) {
+      cart.coupon = '';
+      cart.discount = 0;
+      // pre-save hook sẽ tính lại totalAfterDiscount theo cartTotal
+      await cart.save();
+      return res.status(200).json(cart);
     }
+
+    // Always calculate based on DB coupon + current cartTotal (do NOT trust frontend)
+    const result = await validateForCart({ code, userId });
+    if (!result.ok) {
+      return res.status(400).json({ message: result.message || 'Không thể áp dụng mã giảm giá.' });
+    }
+
+    cart.coupon = code;
+    cart.discount = Number(result.coupon.discount || 0);
     
     await cart.save();
     return res.status(200).json(cart);

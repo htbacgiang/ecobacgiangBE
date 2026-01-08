@@ -21,6 +21,11 @@ const OrderSchema = new mongoose.Schema({
   deliveryTime: { type: String }, // Thời gian giao hàng: 'business_hours' hoặc '17-18', '18-19', '19-20'
   coupon: { type: String },
   discount: { type: Number, default: 0 },
+  // Dùng để chống tạo trùng đơn khi thanh toán online (Sepay/MoMo)
+  paymentCode: { type: String, default: '' },
+  // Tracking coupon usage timing
+  couponReserved: { type: Boolean, default: false },
+  couponCommitted: { type: Boolean, default: false },
   totalPrice: { type: Number, required: true },
   totalAfterDiscount: { type: Number },
   shippingFee: { type: Number, default: 30000 },

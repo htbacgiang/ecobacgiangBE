@@ -9,6 +9,7 @@ const Account = require('../models/Account');
 const { withAuth, optionalAuth } = require('../middleware/auth');
 const { syncOrderToAccounting } = require('../services/accountingService');
 const { normalizeUnit } = require('../utils/normalizeUnit');
+const { commitForPaidOrder, releaseReservation, normalizeCode } = require('../services/couponUsageService');
 
 // GET /api/orders - Get user's orders (or all orders if admin)
 router.get('/', optionalAuth, async (req, res) => {
@@ -316,6 +317,36 @@ router.patch('/:id', optionalAuth, async (req, res) => {
       updateData,
       { new: true }
     ).populate('user', 'name email phone'); // Populate user để dùng trong accountingService
+
+    // --- COUPON USAGE: commit/release based on status transition ---
+    try {
+      const newStatus = updateData.status || previousStatus;
+      const couponCode = normalizeCode(updatedOrder.coupon);
+      const hasCoupon = !!couponCode;
+      const userId = updatedOrder.user;
+
+      if (hasCoupon && userId) {
+        // Commit when order is paid
+        if (newStatus === 'paid' && previousStatus !== 'paid' && !updatedOrder.couponCommitted) {
+          await commitForPaidOrder({
+            code: couponCode,
+            userId,
+            session: null,
+            hasReservation: !!updatedOrder.couponReserved,
+          });
+          await Order.findByIdAndUpdate(updatedOrder._id, { couponCommitted: true, couponReserved: false });
+        }
+
+        // Release reservation when cancelled (before paid)
+        if (newStatus === 'cancelled' && previousStatus !== 'cancelled' && updatedOrder.couponReserved && !updatedOrder.couponCommitted) {
+          await releaseReservation({ code: couponCode, userId, session: null });
+          await Order.findByIdAndUpdate(updatedOrder._id, { couponReserved: false });
+        }
+      }
+    } catch (couponErr) {
+      console.error('Coupon usage update error:', couponErr);
+      // don't block order update; but log so we can investigate
+    }
 
     // Đồng bộ vào kế toán nếu status thay đổi
     // Đặc biệt quan trọng cho COD: Khi chuyển sang shipped/delivered → Tạo công nợ Phải Thu (TK 131)
