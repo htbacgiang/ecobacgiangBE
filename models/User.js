@@ -99,6 +99,15 @@ const userSchema = new mongoose.Schema(
     emailVerificationSentAt: {
       type: Date,
     },
+    resetPasswordOTP: {
+      type: String,
+    },
+    resetPasswordOTPExpiry: {
+      type: Date,
+    },
+    resetPasswordSentAt: {
+      type: Date,
+    },
     agree: { type: Boolean, required: true },
     defaultPaymentMethod: {
       type: String,

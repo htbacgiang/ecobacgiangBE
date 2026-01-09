@@ -218,7 +218,7 @@ router.post('/', async (req, res) => {
           // Tính toán lại totals từ cart
           const totalPrice = cart.products.reduce((sum, item) => sum + (item.price * (item.quantity || 0)), 0);
           const totalAfterDiscount = cart.totalAfterDiscount || totalPrice;
-          const shippingFee = 30000;
+          const shippingFee = 0;
           const finalTotal = totalAfterDiscount + shippingFee;
           
           // Kiểm tra xem finalTotal có khớp với payment amount không (cho phép sai số 1000 VND)

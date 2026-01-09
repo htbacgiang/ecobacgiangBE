@@ -67,12 +67,36 @@ router.get('/', optionalAuth, async (req, res) => {
 });
 
 // GET /api/orders/bestsellers - Get best selling products
+// Query params: month (1-12), year (YYYY)
 router.get('/bestsellers', async (req, res) => {
   try {
     await db.connectDb();
     
-    // Lấy danh sách đơn hàng không bị hủy
-    const orders = await Order.find({ status: { $ne: 'cancelled' } }).lean();
+    // Lấy query parameters
+    const { month, year } = req.query;
+    
+    // Xây dựng filter cho đơn hàng
+    const orderFilter = { status: { $ne: 'cancelled' } };
+    
+    // Nếu có month và year, filter theo tháng/năm
+    if (month && year) {
+      const monthNum = parseInt(month);
+      const yearNum = parseInt(year);
+      
+      if (monthNum >= 1 && monthNum <= 12 && yearNum > 0) {
+        // Tạo date range cho tháng được chọn
+        const startDate = new Date(yearNum, monthNum - 1, 1);
+        const endDate = new Date(yearNum, monthNum, 0, 23, 59, 59, 999);
+        
+        orderFilter.createdAt = {
+          $gte: startDate,
+          $lte: endDate
+        };
+      }
+    }
+    
+    // Lấy danh sách đơn hàng không bị hủy (có thể filter theo tháng)
+    const orders = await Order.find(orderFilter).lean();
 
     // Tính tổng số lượng sản phẩm theo title
     const productQuantities = {};

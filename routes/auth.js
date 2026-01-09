@@ -381,6 +381,258 @@ router.post('/resend-email-otp', async (req, res) => {
   }
 });
 
+// Email template for reset password OTP
+const resetPasswordEmailTemplate = (otp) => {
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body {
+          font-family: Arial, sans-serif;
+          line-height: 1.6;
+          color: #333;
+        }
+        .container {
+          max-width: 600px;
+          margin: 0 auto;
+          padding: 20px;
+        }
+        .header {
+          background-color: #009934;
+          color: white;
+          padding: 20px;
+          text-align: center;
+          border-radius: 5px 5px 0 0;
+        }
+        .content {
+          background-color: #f9f9f9;
+          padding: 30px;
+          border-radius: 0 0 5px 5px;
+        }
+        .otp-box {
+          background-color: white;
+          border: 2px solid #009934;
+          border-radius: 8px;
+          padding: 20px;
+          text-align: center;
+          margin: 20px 0;
+        }
+        .otp-code {
+          font-size: 32px;
+          font-weight: bold;
+          color: #009934;
+          letter-spacing: 5px;
+        }
+        .footer {
+          margin-top: 20px;
+          font-size: 12px;
+          color: #666;
+          text-align: center;
+        }
+        .warning {
+          background-color: #fff3cd;
+          border-left: 4px solid #ffc107;
+          padding: 15px;
+          margin: 15px 0;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header">
+          <h1>Đặt Lại Mật Khẩu</h1>
+        </div>
+        <div class="content">
+          <p>Xin chào,</p>
+          <p>Chúng tôi nhận được yêu cầu đặt lại mật khẩu cho tài khoản của bạn tại Eco Bắc Giang.</p>
+          <p>Vui lòng sử dụng mã OTP sau để đặt lại mật khẩu:</p>
+          <div class="otp-box">
+            <div class="otp-code">${otp}</div>
+          </div>
+          <p>Mã OTP này có hiệu lực trong <strong>10 phút</strong>.</p>
+          <div class="warning">
+            <p><strong>⚠️ Lưu ý:</strong> Nếu bạn không yêu cầu đặt lại mật khẩu, vui lòng bỏ qua email này. Mật khẩu của bạn sẽ không thay đổi.</p>
+          </div>
+          <div class="footer">
+            <p>Trân trọng,<br>Đội ngũ EcoBacGiang</p>
+          </div>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+};
+
+// POST /api/auth/forgot-password - Request password reset
+router.post('/forgot-password', async (req, res) => {
+  try {
+    await db.connectDb();
+
+    const { email } = req.body;
+
+    // Validate input
+    if (!email) {
+      return res.status(400).json({
+        message: 'Vui lòng cung cấp địa chỉ email.',
+      });
+    }
+
+    if (!validator.isEmail(email)) {
+      return res.status(400).json({
+        message: 'Địa chỉ email không hợp lệ.',
+      });
+    }
+
+    // Normalize email
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Find user by email
+    const user = await User.findOne({ email: normalizedEmail });
+
+    if (!user) {
+      // Don't reveal if email exists for security
+      return res.status(200).json({
+        message: 'Nếu email tồn tại trong hệ thống, mã OTP đã được gửi đến email của bạn.',
+      });
+    }
+
+    // Check if email is verified
+    if (!user.emailVerified) {
+      return res.status(400).json({
+        message: 'Email chưa được xác nhận. Vui lòng xác nhận email trước khi đặt lại mật khẩu.',
+      });
+    }
+
+    // Generate OTP for password reset
+    const otp = generateOTP();
+    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    // Save OTP to user
+    user.resetPasswordOTP = otp;
+    user.resetPasswordOTPExpiry = otpExpiry;
+    user.resetPasswordSentAt = new Date();
+    await user.save();
+
+    // Send email with OTP
+    try {
+      await sendEmail(
+        email,
+        '',
+        '',
+        'Đặt Lại Mật Khẩu - EcoBacGiang',
+        resetPasswordEmailTemplate(otp)
+      );
+    } catch (emailError) {
+      console.error('Error sending reset password email:', emailError);
+      return res.status(500).json({
+        message: 'Không thể gửi email. Vui lòng thử lại sau.',
+      });
+    }
+
+    return res.status(200).json({
+      status: true,
+      message: 'Mã OTP đã được gửi đến email của bạn. Vui lòng kiểm tra hộp thư.',
+    });
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    return res.status(500).json({
+      message: error.message || 'Đã xảy ra lỗi khi xử lý yêu cầu đặt lại mật khẩu.',
+    });
+  }
+});
+
+// POST /api/auth/reset-password - Reset password with OTP
+router.post('/reset-password', async (req, res) => {
+  try {
+    await db.connectDb();
+
+    const { email, otp, newPassword, confirmPassword } = req.body;
+
+    // Validate input
+    if (!email || !otp || !newPassword || !confirmPassword) {
+      return res.status(400).json({
+        message: 'Vui lòng điền đầy đủ các trường.',
+      });
+    }
+
+    if (!validator.isEmail(email)) {
+      return res.status(400).json({
+        message: 'Địa chỉ email không hợp lệ.',
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        message: 'Mật khẩu mới phải có ít nhất 6 ký tự.',
+      });
+    }
+
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({
+        message: 'Mật khẩu xác nhận không khớp.',
+      });
+    }
+
+    // Normalize email
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Find user by email
+    const user = await User.findOne({ email: normalizedEmail });
+
+    if (!user) {
+      return res.status(400).json({
+        message: 'Email không tồn tại trong hệ thống.',
+      });
+    }
+
+    // Check if OTP exists
+    if (!user.resetPasswordOTP) {
+      return res.status(400).json({
+        message: 'Không tìm thấy mã OTP. Vui lòng yêu cầu mã OTP mới.',
+      });
+    }
+
+    // Check if OTP matches
+    if (user.resetPasswordOTP !== otp) {
+      return res.status(400).json({
+        message: 'Mã OTP không đúng.',
+      });
+    }
+
+    // Check if OTP is expired
+    if (!user.resetPasswordOTPExpiry || new Date() > user.resetPasswordOTPExpiry) {
+      // Clear expired OTP
+      user.resetPasswordOTP = undefined;
+      user.resetPasswordOTPExpiry = undefined;
+      await user.save();
+      return res.status(400).json({
+        message: 'Mã OTP đã hết hạn. Vui lòng yêu cầu mã OTP mới.',
+      });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+    // Update password and clear OTP
+    user.password = hashedPassword;
+    user.resetPasswordOTP = undefined;
+    user.resetPasswordOTPExpiry = undefined;
+    await user.save();
+
+    return res.status(200).json({
+      status: true,
+      message: 'Đặt lại mật khẩu thành công! Bạn có thể đăng nhập với mật khẩu mới.',
+    });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    return res.status(500).json({
+      message: error.message || 'Đã xảy ra lỗi khi đặt lại mật khẩu.',
+    });
+  }
+});
+
 // POST /api/auth/change-password - Change password
 router.post('/change-password', async (req, res) => {
   try {

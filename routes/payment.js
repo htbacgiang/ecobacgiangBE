@@ -14,9 +14,9 @@ const { commitForPaidOrder, normalizeCode } = require('../services/couponUsageSe
 
 // Thông tin tài khoản nhận tiền (CẬP NHẬT THEO THÔNG TIN THẬT CỦA BẠN)
 const BANK_INFO = {
-  bankId: process.env.SEPAY_BANK_ID || "TPB", // TPBank
-  accountNumber: process.env.SEPAY_ACCOUNT_NUMBER || "03924302701",
-  accountName: process.env.SEPAY_ACCOUNT_NAME || "NGO QUANG TRUONG",
+  bankId: process.env.SEPAY_BANK_ID || "MBB", // TPBank
+  accountNumber: process.env.SEPAY_ACCOUNT_NUMBER || "881810666",
+  accountName: process.env.SEPAY_ACCOUNT_NAME || "NGUYEN CONG TUYEN",
   description: process.env.SEPAY_DESCRIPTION || "Thanh toan don hang Eco Bac Giang"
 };
 

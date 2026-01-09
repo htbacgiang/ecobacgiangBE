@@ -57,13 +57,12 @@ ALLOWED_ORIGINS=${allowedOrigins}
 MONGODB_URI=${mongodbUri}
 
 # ============================================
-# EMAIL CONFIGURATION (Gmail OAuth2)
+# EMAIL CONFIGURATION (Gmail App Password)
 # ============================================
 # Cấu hình để gửi email OTP cho đăng ký
-MAILING_SERVICE_CLIENT_ID=your-gmail-client-id
-MAILING_SERVICE_CLIENT_SECRET=your-gmail-client-secret
-MAILING_SERVICE_REFRESH_TOKEN=your-gmail-refresh-token
+# Hướng dẫn tạo App Password: https://support.google.com/accounts/answer/185833
 SENDER_EMAIL_ADDRESS=your-email@gmail.com
+SENDER_EMAIL_PASSWORD=your-16-digit-app-password
 `;
 
   // Ghi file
