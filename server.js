@@ -183,6 +183,8 @@ app.get('/health', (req, res) => {
 
 // API Routes
 app.use('/api/auth', authRoutes);
+// Dự phòng khi Nginx proxy_pass có dấu / cuối (strip /api) → request tới backend là /auth/signin thay vì /api/auth/signin
+app.use('/auth', authRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/cart', cartRoutes);
