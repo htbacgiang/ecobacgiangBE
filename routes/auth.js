@@ -162,7 +162,10 @@ router.post('/signup', async (req, res) => {
         otpEmailTemplate(otp)
       );
     } catch (emailError) {
-      console.error('Error sending email:', emailError);
+      console.error('Error sending signup email:', emailError);
+      return res.status(500).json({
+        message: 'Không thể gửi email. Vui lòng thử lại sau.',
+      });
     }
 
     return res.status(200).json({
@@ -250,6 +253,51 @@ router.post('/signin', async (req, res) => {
     return res.status(500).json({
       message: error.message || 'Đã xảy ra lỗi khi đăng nhập.',
     });
+  }
+});
+
+// POST /api/auth/sync-token - Cấp JWT cho user đã đăng nhập Google (NextAuth)
+// FE gọi với email từ session để lấy token BE, dùng cho checkout, địa chỉ, v.v.
+router.post('/sync-token', async (req, res) => {
+  try {
+    await db.connectDb();
+    const { email } = req.body;
+    if (!email || !validator.isEmail(email)) {
+      return res.status(400).json({ message: 'Email không hợp lệ.' });
+    }
+    const normalizedEmail = email.toLowerCase().trim();
+    const user = await User.findOne({ email: normalizedEmail });
+    if (!user) {
+      return res.status(404).json({ message: 'Không tìm thấy tài khoản. Vui lòng đăng nhập bằng Google trước.' });
+    }
+    if (!user.emailVerified) {
+      return res.status(400).json({ message: 'Tài khoản chưa được xác thực.' });
+    }
+    const token = jwt.sign(
+      { id: user._id.toString(), email: user.email, role: user.role },
+      process.env.NEXTAUTH_SECRET || process.env.JWT_SECRET || 'fallback-secret-key-for-development',
+      { expiresIn: '30d' }
+    );
+    const userData = {
+      id: user._id.toString(),
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      image: user.image,
+      emailVerified: user.emailVerified,
+      gender: user.gender,
+      dateOfBirth: user.dateOfBirth,
+    };
+    return res.status(200).json({
+      status: true,
+      message: 'Đồng bộ token thành công.',
+      user: userData,
+      token,
+    });
+  } catch (error) {
+    console.error('Sync token error:', error);
+    return res.status(500).json({ message: error.message || 'Đã xảy ra lỗi đồng bộ.' });
   }
 });
 
@@ -366,7 +414,10 @@ router.post('/resend-email-otp', async (req, res) => {
         otpEmailTemplate(otp)
       );
     } catch (emailError) {
-      console.error('Error sending email:', emailError);
+      console.error('Error sending resend OTP email:', emailError);
+      return res.status(500).json({
+        message: 'Không thể gửi email. Vui lòng thử lại sau.',
+      });
     }
 
     return res.status(200).json({

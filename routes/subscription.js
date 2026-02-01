@@ -4,6 +4,44 @@ const db = require('../config/database');
 const Subscription = require('../models/Subscription');
 const { withAuth } = require('../middleware/auth');
 const User = require('../models/User');
+const { sendEmail } = require('../utils/sendEmails');
+
+// Email thông báo cho admin khi có đăng ký nhận tin mới
+const adminNewSubscriptionTemplate = (subscriberEmail, subscribedAt, ipAddress) => {
+  const timeStr = subscribedAt ? new Date(subscribedAt).toLocaleString('vi-VN') : new Date().toLocaleString('vi-VN');
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background: #009934; color: white; padding: 16px; text-align: center; border-radius: 8px 8px 0 0; }
+        .content { background: #f9f9f9; padding: 24px; border-radius: 0 0 8px 8px; border: 1px solid #e0e0e0; border-top: none; }
+        .info { background: white; padding: 16px; margin: 12px 0; border-radius: 8px; border-left: 4px solid #009934; }
+        .label { font-weight: bold; color: #555; }
+        .footer { margin-top: 20px; font-size: 12px; color: #666; text-align: center; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header"><h2 style="margin:0;">Thông báo đăng ký nhận tin mới</h2></div>
+        <div class="content">
+          <p>Có người dùng vừa đăng ký nhận thông báo qua email.</p>
+          <div class="info">
+            <p><span class="label">Email đăng ký:</span> ${subscriberEmail}</p>
+            <p><span class="label">Thời gian:</span> ${timeStr}</p>
+            ${ipAddress ? `<p><span class="label">IP:</span> ${ipAddress}</p>` : ''}
+          </div>
+          <p>Bạn có thể xem danh sách tại trang quản trị → Danh sách email đăng ký.</p>
+        </div>
+        <div class="footer">Eco Bắc Giang – Hệ thống thông báo</div>
+      </div>
+    </body>
+    </html>
+  `;
+};
 
 // GET /api/subscription - Get list of subscriptions with pagination (Admin only)
 router.get('/', withAuth, async (req, res) => {
@@ -135,6 +173,23 @@ router.post('/', async (req, res) => {
       userAgent: req.get('user-agent')
     });
     await subscription.save();
+
+    // Gửi email thông báo cho admin
+    const adminEmail = process.env.ADMIN_EMAIL || process.env.SENDER_EMAIL_ADDRESS;
+    if (adminEmail) {
+      try {
+        await sendEmail(
+          adminEmail,
+          '',
+          '',
+          '[Eco Bắc Giang] Có đăng ký nhận tin mới',
+          adminNewSubscriptionTemplate(email, subscription.subscribedAt, req.ip)
+        );
+      } catch (emailErr) {
+        console.error('Failed to send admin subscription notification:', emailErr);
+        // Không fail request – đăng ký đã thành công, chỉ lỗi gửi thông báo admin
+      }
+    }
 
     return res.status(200).json({ 
       success: true,

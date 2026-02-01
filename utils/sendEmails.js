@@ -5,15 +5,19 @@ const {
   SENDER_EMAIL_PASSWORD,
 } = process.env;
 
+// Chuẩn hóa: trim và bỏ hết khoảng trắng trong App Password (Gmail hiển thị dạng "xxxx xxxx xxxx xxxx")
+const normalizedEmail = (SENDER_EMAIL_ADDRESS || '').trim();
+const normalizedPassword = (SENDER_EMAIL_PASSWORD || '').replace(/\s/g, '').trim();
+
 // Validate email configuration
-if (!SENDER_EMAIL_ADDRESS || !SENDER_EMAIL_PASSWORD) {
+if (!normalizedEmail || !normalizedPassword) {
   console.error("❌ EMAIL CONFIGURATION ERROR:");
   console.error("Missing required environment variables:");
-  if (!SENDER_EMAIL_ADDRESS) {
-    console.error("  - SENDER_EMAIL_ADDRESS is not set");
+  if (!normalizedEmail) {
+    console.error("  - SENDER_EMAIL_ADDRESS is not set or empty");
   }
-  if (!SENDER_EMAIL_PASSWORD) {
-    console.error("  - SENDER_EMAIL_PASSWORD is not set");
+  if (!normalizedPassword) {
+    console.error("  - SENDER_EMAIL_PASSWORD is not set or empty (App Password 16 ký tự, có thể bỏ dấu cách)");
   }
   console.error("\n📝 Please add these to your .env file:");
   console.error("   SENDER_EMAIL_ADDRESS=your-email@gmail.com");
@@ -23,8 +27,7 @@ if (!SENDER_EMAIL_ADDRESS || !SENDER_EMAIL_PASSWORD) {
 
 // Send email using App Password
 const sendEmail = (to, url, txt, subject, template) => {
-  // Check if credentials are available
-  if (!SENDER_EMAIL_ADDRESS || !SENDER_EMAIL_PASSWORD) {
+  if (!normalizedEmail || !normalizedPassword) {
     const error = new Error(
       "Email configuration is missing. Please set SENDER_EMAIL_ADDRESS and SENDER_EMAIL_PASSWORD in your .env file."
     );
@@ -35,8 +38,8 @@ const sendEmail = (to, url, txt, subject, template) => {
   const smtpTransport = nodemailer.createTransport({
     service: 'gmail',
     auth: {
-      user: SENDER_EMAIL_ADDRESS,
-      pass: SENDER_EMAIL_PASSWORD, // App Password từ Google
+      user: normalizedEmail,
+      pass: normalizedPassword,
     },
   });
 
@@ -50,9 +53,9 @@ const sendEmail = (to, url, txt, subject, template) => {
   `;
 
   const mailOptions = {
-    from: SENDER_EMAIL_ADDRESS,
+    from: normalizedEmail,
     to: to,
-    subject: subject,
+    subject: subject || 'EcoBacGiang',
     html: htmlContent,
   };
 
