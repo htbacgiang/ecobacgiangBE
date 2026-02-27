@@ -132,7 +132,6 @@ router.post('/check-slug', async (req, res) => {
     }
     const existingProduct = await Product.findOne(query);
     if (existingProduct) {
-      return res.status(400).json({ status: 'error', err: 'Slug đã tồn tại' });
     }
     res.json({ status: 'success' });
   } catch (err) {

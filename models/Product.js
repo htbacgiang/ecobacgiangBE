@@ -20,15 +20,22 @@ const productSchema = new mongoose.Schema(
       default: 0,
       required: [true, 'Giá sản phẩm là bắt buộc'],
     },
-    promotionalPrice: {
+    // Giá gốc (trước khi giảm giá) - lưu trong DB với key "promotionalPrice" để tương thích dữ liệu cũ
+    giaGoc: {
       type: Number,
       min: 0,
       default: 0,
+      alias: 'promotionalPrice',
       validate: {
         validator: function (value) {
-          return !this.price || value <= this.price;
+          // Nếu không nhập giá gốc (0 hoặc null) thì bỏ qua validate
+          if (!value) return true;
+          // Nếu chưa có giá bán thì bỏ qua validate
+          if (!this.price) return true;
+          // Giá gốc phải lớn hơn hoặc bằng giá bán hiện tại
+          return value >= this.price;
         },
-        message: 'Giá khuyến mãi không được vượt quá giá thường',
+        message: 'Giá gốc phải lớn hơn hoặc bằng giá bán hiện tại',
       },
     },
     content: {
