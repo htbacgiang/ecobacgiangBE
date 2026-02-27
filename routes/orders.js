@@ -131,8 +131,7 @@ router.get('/bestsellers', async (req, res) => {
         rating: product.rating || 0,
         reviewCount: product.reviewCount || 0,
         price: product.price || 0,
-        // Giá gốc (giaGoc) vẫn được expose dưới dạng promotionalPrice để tương thích FE cũ
-        promotionalPrice: product.giaGoc || product.promotionalPrice || 0,
+        // Giá gốc (giaGoc), fallback promotionalPrice cho dữ liệu cũ
         giaGoc: product.giaGoc || product.promotionalPrice || 0,
         stockStatus: product.stockStatus || 'Còn hàng',
         slug: product.slug,
